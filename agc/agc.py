@@ -19,20 +19,22 @@ import os
 import gzip
 import statistics
 import textwrap
+import numpy as np
 from pathlib import Path
 from collections import Counter
 from typing import Iterator, Dict, List
 # https://github.com/briney/nwalign3
 # ftp://ftp.ncbi.nih.gov/blast/matrices/
 import nwalign3 as nw
+np.int = int
 
-__author__ = "Your Name"
+__author__ = "Nicolas Salaun"
 __copyright__ = "Universite Paris Diderot"
-__credits__ = ["Your Name"]
+__credits__ = ["Nicolas Salaun"]
 __license__ = "GPL"
 __version__ = "1.0.0"
-__maintainer__ = "Your Name"
-__email__ = "your@email.fr"
+__maintainer__ = "Nicolas Salaun"
+__email__ = "nicolas.salaun@orange.fr"
 __status__ = "Developpement"
 
 
@@ -83,7 +85,15 @@ def read_fasta(amplicon_file: Path, minseqlen: int) -> Iterator[str]:
     :param minseqlen: (int) Minimum amplicon sequence length
     :return: A generator object that provides the Fasta sequences (str).
     """
-    pass
+    with gzip.open(amplicon_file, 'rt') as f:
+        for line in f:
+            if line.startswith(">"):
+                header = line.strip()
+                sequence = ""
+            else:
+                sequence += line.strip()
+                if len(sequence) >= minseqlen:
+                    yield sequence
 
 
 def dereplication_fulllength(amplicon_file: Path, minseqlen: int, mincount: int) -> Iterator[List]:
@@ -94,15 +104,28 @@ def dereplication_fulllength(amplicon_file: Path, minseqlen: int, mincount: int)
     :param mincount: (int) Minimum amplicon count
     :return: A generator object that provides a (list)[sequences, count] of sequence with a count >= mincount and a length >= minseqlen.
     """
-    pass
+    seq_count = {}
+    for sequence in list(read_fasta(amplicon_file, minseqlen)):
+        if sequence in seq_count:
+            seq_count[sequence] += 1
+        else:
+            seq_count[sequence] = 1
 
+    seq_count = sorted(seq_count.items(), key=lambda x:x[1], reverse=True) 
+    for (seq, count) in seq_count:
+        if count >= mincount:
+            yield [seq, count]
+    
+    
+    
 def get_identity(alignment_list: List[str]) -> float:
     """Compute the identity rate between two sequences
 
     :param alignment_list:  (list) A list of aligned sequences in the format ["SE-QUENCE1", "SE-QUENCE2"]
     :return: (float) The rate of identity between the two sequences.
     """
-    pass
+    return sum(1 for a, b in zip(*alignment_list) if a == b) / len(alignment_list[0]) * 100
+    
 
 def abundance_greedy_clustering(amplicon_file: Path, minseqlen: int, mincount: int, chunk_size: int, kmer_size: int) -> List:
     """Compute an abundance greedy clustering regarding sequence count and identity.
@@ -115,7 +138,16 @@ def abundance_greedy_clustering(amplicon_file: Path, minseqlen: int, mincount: i
     :param kmer_size: (int) A fournir mais non utilise cette annee
     :return: (list) A list of all the [OTU (str), count (int)] .
     """
-    pass
+    ref = list(dereplication_fulllength(amplicon_file, minseqlen, mincount))
+    tpm = []
+    for seq in ref:
+        for seq2 in dereplication_fulllength(amplicon_file, minseqlen, mincount):
+            align = nw.global_align(seq[0], seq2[0], gap_open=-1, gap_extend=-1,
+                                    matrix=os.path.abspath(os.path.join(
+                                        os.path.dirname(__file__), "MATCH")))
+            if get_identity(align) <= 97:
+                tpm.append(seq)
+    return tpm
 
 
 def write_OTU(OTU_list: List, output_file: Path) -> None:
@@ -136,8 +168,6 @@ def main(): # pragma: no cover
     """
     # Get arguments
     args = get_arguments()
-    # Votre programme ici
-
 
 
 if __name__ == '__main__':
