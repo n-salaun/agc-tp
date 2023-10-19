@@ -100,11 +100,11 @@ def dereplication_fulllength(amplicon_file: Path, minseqlen: int, mincount: int)
     :param mincount: (int) Minimum amplicon count
     :return: A generator object that provides a (list)[sequences, count] of sequence with a count >= mincount and a length >= minseqlen.
     """
-    seq_count = Counter()
+    seq_count = {}
     for sequence in read_fasta(amplicon_file, minseqlen):
-        seq_count[sequence] += 1
+        seq_count[sequence] = seq_count.get(sequence, 0) + 1
 
-    for seq, count in seq_count.items():
+    for seq, count in sorted(seq_count.items(), key=lambda x: x[1], reverse=True):
         if count >= mincount:
             yield [seq, count]
 
@@ -134,9 +134,7 @@ def abundance_greedy_clustering(amplicon_file: Path, minseqlen: int, mincount: i
     seqs_gen = dereplication_fulllength(amplicon_file, minseqlen, mincount)
     OTU_bank = [next(seqs_gen)]
     
-    for i, seq_info in enumerate(seqs_gen):
-        if i % 100 == 0:
-            print(i)
+    for seq_info in seqs_gen:
         if all(get_identity(nw.global_align(seq_info[0], otu_seq_info[0], gap_open=-1, gap_extend=-1, matrix=os.path.abspath(os.path.join(os.path.dirname(__file__),"MATCH")))) <= 97 for otu_seq_info in OTU_bank):
             OTU_bank.append([seq_info[0],seq_info[1]])
 
