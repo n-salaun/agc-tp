@@ -79,21 +79,17 @@ def get_arguments(): # pragma: no cover
 
 
 def read_fasta(amplicon_file: Path, minseqlen: int) -> Iterator[str]:
-    """Read a compressed fasta and extract all fasta sequences.
-
-    :param amplicon_file: (Path) Path to the amplicon file in FASTA.gz format.
-    :param minseqlen: (int) Minimum amplicon sequence length
-    :return: A generator object that provides the Fasta sequences (str).
-    """
-    with gzip.open(amplicon_file, 'rt') as f:
+    with gzip.open(amplicon_file, "rt") as f:
+        seq = ""
         for line in f:
             if line.startswith(">"):
-                header = line.strip()
-                sequence = ""
+                if len(seq) >= minseqlen:
+                    yield seq
+                seq = ""
             else:
-                sequence += line.strip()
-                if len(sequence) >= minseqlen:
-                    yield sequence
+                seq += line.strip()
+        yield seq if len(seq) >= minseqlen else ""
+
 
 
 def dereplication_fulllength(amplicon_file: Path, minseqlen: int, mincount: int) -> Iterator[List]:
@@ -104,17 +100,14 @@ def dereplication_fulllength(amplicon_file: Path, minseqlen: int, mincount: int)
     :param mincount: (int) Minimum amplicon count
     :return: A generator object that provides a (list)[sequences, count] of sequence with a count >= mincount and a length >= minseqlen.
     """
-    seq_count = {}
-    for sequence in list(read_fasta(amplicon_file, minseqlen)):
-        if sequence in seq_count:
-            seq_count[sequence] += 1
-        else:
-            seq_count[sequence] = 1
+    seq_count = Counter()
+    for sequence in read_fasta(amplicon_file, minseqlen):
+        seq_count[sequence] += 1
 
-    seq_count = sorted(seq_count.items(), key=lambda x:x[1], reverse=True) 
-    for (seq, count) in seq_count:
+    for seq, count in seq_count.items():
         if count >= mincount:
             yield [seq, count]
+
     
     
     
@@ -138,16 +131,16 @@ def abundance_greedy_clustering(amplicon_file: Path, minseqlen: int, mincount: i
     :param kmer_size: (int) A fournir mais non utilise cette annee
     :return: (list) A list of all the [OTU (str), count (int)] .
     """
-    ref = list(dereplication_fulllength(amplicon_file, minseqlen, mincount))
-    tpm = []
-    for seq in ref:
-        for seq2 in dereplication_fulllength(amplicon_file, minseqlen, mincount):
-            align = nw.global_align(seq[0], seq2[0], gap_open=-1, gap_extend=-1,
-                                    matrix=os.path.abspath(os.path.join(
-                                        os.path.dirname(__file__), "MATCH")))
-            if get_identity(align) <= 97:
-                tpm.append(seq)
-    return tpm
+    seqs_gen = dereplication_fulllength(amplicon_file, minseqlen, mincount)
+    OTU_bank = [next(seqs_gen)]
+    
+    for i, seq_info in enumerate(seqs_gen):
+        if i % 100 == 0:
+            print(i)
+        if all(get_identity(nw.global_align(seq_info[0], otu_seq_info[0], gap_open=-1, gap_extend=-1, matrix=os.path.abspath(os.path.join(os.path.dirname(__file__),"MATCH")))) <= 97 for otu_seq_info in OTU_bank):
+            OTU_bank.append([seq_info[0],seq_info[1]])
+
+    return OTU_bank
 
 
 def write_OTU(OTU_list: List, output_file: Path) -> None:
@@ -156,7 +149,11 @@ def write_OTU(OTU_list: List, output_file: Path) -> None:
     :param OTU_list: (list) A list of OTU sequences
     :param output_file: (Path) Path to the output file
     """
-    pass
+    with open(output_file, "w") as f:
+        for i, otu in enumerate(OTU_list):
+            f.write(f">OTU_{i+1} occurrence:{otu[1]}\n")
+            f.write(f"{otu[0]}\n")
+
 
 
 #==============================================================
@@ -166,8 +163,9 @@ def main(): # pragma: no cover
     """
     Main program function
     """
-    # Get arguments
     args = get_arguments()
+    otu = abundance_greedy_clustering(args.amplicon_file, args.minseqlen, args.mincount, 0, 0)
+    write_OTU(otu, args.output_file)
 
 
 if __name__ == '__main__':
